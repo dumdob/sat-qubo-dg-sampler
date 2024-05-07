@@ -1,0 +1,19 @@
+{
+    "num_threads": 1,
+    "output_path": "dg_data",
+
+    "seed": 123,
+    
+    "problem_class": "uf",
+    
+    "max_gwl_steps": 100000,
+
+    "K_basins": 100,
+
+    "beta_scale": 1,
+    "E_scale": 0.75,
+
+    "BFS_E_max": 3,
+
+    "save_local_minima": true
+}
