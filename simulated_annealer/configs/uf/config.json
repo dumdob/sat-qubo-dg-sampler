@@ -1,0 +1,15 @@
+{
+  "N": 50,
+
+  "energy_gap": 0,
+
+  "instances_source": "range",
+  "instances": [1, 50],
+  
+  "schedules": {
+    "t_schedule": "exponential"
+  },
+
+  "Ti": 1.5,
+  "Tf": 0.1
+}

@@ -1,4 +1,4 @@
-INC_DIR = include
+INC_DIR = include $(CONDA_PREFIX)/include/eigen3 $(CONDA_PREFIX)/include
 
 SRC_DIR = src
 BUILD_DIR = build
@@ -11,18 +11,18 @@ INC = $(patsubst %, -I%, $(INC_DIR))
 
 DBG_FLAGS = -DEIGEN_DONT_PARALLELIZE -O3 -w -g -DNDEBUG -DEIGEN_NO_DEBUG
 
-CXX = clang++
+CXX = g++
 OMP_FLAGS = -fopenmp
 CXXFLAGS = -std=c++17 $(DBG_FLAGS) $(OMP_FLAGS)
 
-LPATHS = 
-LFLAGS = gsl gslcblas omp
+LPATHS = $(CONDA_PREFIX)/lib
+LFLAGS = gsl gslcblas m gomp
 LIB = $(patsubst %, -L%, $(LPATHS)) $(patsubst %, -l%, $(LFLAGS))
 
 all: dg_sampler.out
 
 dg_sampler.out: $(OBJ_FILES)
-	$(CXX) $(LIB) $(OBJ_FILES) -g -o $@
+	$(CXX) -static -o $@ $(OBJ_FILES) $(LIB) 
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(@D)

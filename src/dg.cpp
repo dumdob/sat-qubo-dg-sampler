@@ -189,53 +189,6 @@ int UboLandscape::dEqubo(const VectorXb &Xb, int xk, int Factor, int return_type
   return min_df;
 }
 
-// ballistic search starting in random directions
-// returns an exit vector and the sequence of taken directions
-pair<VectorXb, Vint>
-UboLandscape::ballistic_search(const VectorXb& start, int dir0, const VectorXi& ballistic_dirs)
-{
-  VectorXb X = start;
-  Vint taken_dirs;
-
-  list<reference_wrapper<const int>> allowed_dirs(ballistic_dirs.begin(), ballistic_dirs.end());
-
-  for (size_t i = 0; i < N0; i++)
-  {
-    bool stop_ballistic = true;
-    
-    auto j = allowed_dirs.begin();
-    while(j != allowed_dirs.end())
-    {
-      if(*j == dir0){
-        allowed_dirs.erase(j);
-        stop_ballistic = false;
-        break;
-      }
-      
-      int dEtmp = dE_native(X, *j);
-      if(dEtmp == 0 and (!qubo_landscape || dEqubo(X, *j, _QUBO_BAR_FACTOR_, 0) == 0))
-      {
-        int jj = *j;
-        X(jj) = !X(jj);
-        taken_dirs.push_back(*j);
-
-        allowed_dirs.erase(j);
-        
-        stop_ballistic = false;
-        break;
-
-      }else{
-        j++;
-      }
-    }
-    
-    if(stop_ballistic)
-      break;
-  }
-  
-  return pair<VectorXb, Vint>(X, taken_dirs);
-}
-
 vector<E_set<_N0_>> UboLandscape::random_descent(const VectorXb &X0, int *df_out, int rndseed)
 {
   VectorXb X(X0);
@@ -246,61 +199,67 @@ vector<E_set<_N0_>> UboLandscape::random_descent(const VectorXb &X0, int *df_out
   gsl_rng *r = gsl_rng_alloc(T);
   gsl_rng_set(r, rndseed);
 
-  bool found_negative = false;
-  #ifdef _BALLISTIC_SEARCH_
-    VectorXi ballistic_dirs = VectorXi::LinSpaced(N0, 0, N0-1);
-    bool gone_ballistic = false;
-  #else
-    int random_search_count = 0;
-  #endif
-  
+  vector<int> perm(N0);
+  std::iota(perm.begin(), perm.end(), 0);
+
+  bool found_descent = false;  
+  int random_search_count = 0;
+
   int df_total = 0;
 
-  int df, df1;
+  int df, dfq;
   int i1, i2, i3;
 
   vector<int> zero_df_idx;
+  vector<pair<int, int>> zero_df_idx_qubo;
   
   while (true)
   {
-    i1 = gsl_rng_uniform_int(r, N0);
-    df = df1 = 0;
+    gsl_ran_shuffle(r, perm.data(), N0, sizeof(int));
 
-    for (size_t i = i1; i < i1 + N0; i++) {
-      i2 = i % N0;
+    for (size_t i = 0; i < N0; i++) {
+      i2 = perm[i];
 
       df = dE_native(X, i2);
 
-      if(df == 0 && (!qubo_landscape || dEqubo(X, i2, _QUBO_BAR_FACTOR_, 0) == 0) && !found_negative)
+      if (qubo_landscape){
+        if(df < 0)
+        {
+          dfq = dEqubo(X, i2, _QUBO_BAR_FACTOR_, -1); // finds if dEq < 0, else outputs the minimum >=0 
+
+        }else if (df == 0)
+        {
+          dfq = dEqubo(X, i2, _QUBO_BAR_FACTOR_, 0); // finds if dEq == 0
+        }
+      }
+
+      if(df == 0 && (!qubo_landscape || dfq == 0)) // if dEpubo = 0 and dEqubo = 0
         zero_df_idx.push_back(i2);
+
+      if(df < 0  && (!qubo_landscape || dfq == 0)) // if dEpubo < 0 but dEqubo = 0
+        zero_df_idx_qubo.push_back({i2, df});
       
-      if (df < df1 && (!qubo_landscape || dEqubo(X, i2, _QUBO_BAR_FACTOR_, -1) < 0)) 
+      if(df < 0 && (!qubo_landscape || dfq < 0))  // if dEpubo < 0 and dEqubo < 0
       {
-        df1 = df;
         i3 = i2;
-        found_negative = true;
+        found_descent = true;
 
         zero_df_idx.clear();
+        zero_df_idx_qubo.clear();
         
-        if (!is_steepest)
-          break; // do first seen descent
-        
+        break;
       }
     }
 
-    if (found_negative)
+    if (found_descent)
     {
       X(i3) = !X(i3);
-      df_total += df1;
+      df_total += df;
       
-      found_negative = false;
-      #ifdef _BALLISTIC_SEARCH_
-        gone_ballistic = false;
-      #else
-        random_search_count = 0;
-      #endif
-
-    }else if(zero_df_idx.size() == 0)
+      found_descent = false;
+      random_search_count = 0;
+      
+    }else if((zero_df_idx.size() + zero_df_idx_qubo.size()) == 0)
     { 
       if(interim_states.size() > 0 && df_total == interim_states.back().first)
         break;
@@ -309,45 +268,37 @@ vector<E_set<_N0_>> UboLandscape::random_descent(const VectorXb &X0, int *df_out
       
       break; //all gradients positive
 
-    }
-    #ifdef _BALLISTIC_SEARCH_
-      else if(gone_ballistic){
-          break;
-      }
-    #else
-      else if(random_search_count >= _RS_LIMIT_){
-        break;
-      }
-    #endif
-    else
+    }else if(random_search_count >= _RS_LIMIT_){
+      break;
+
+    }else
     {
       if(interim_states.size() == 0 || df_total != interim_states.back().first)
         interim_states.push_back(E_set<_N0_>(df_total, {tobitvec<_N0_>(X)}));
-
+      
       for(auto d: zero_df_idx){
         X(d) = !X(d);
         interim_states.back().second.insert(tobitvec<_N0_>(X));
         X(d) = !X(d);
       }
 
-      i1 = gsl_rng_uniform_int(r, zero_df_idx.size());
-      i3 = zero_df_idx[i1];
-      X(i3) = !X(i3);
-      
-      #ifdef _BALLISTIC_SEARCH_
-        gone_ballistic = true;
-        gsl_ran_shuffle (r, ballistic_dirs.data(), N0, sizeof(int));
-        auto tpl = ballistic_search(X, i3, ballistic_dirs);
-        
-        for(auto x: tpl.second){
-          X(x) = !X(x);
-          interim_states.back().second.insert(tobitvec<_N0_>(X));
-        }
-      #else
+      i1 = gsl_rng_uniform_int(r, zero_df_idx.size() + zero_df_idx_qubo.size());
+
+      if(i1 < zero_df_idx.size()){
+        i3 = zero_df_idx[i1];
         random_search_count++;
-      #endif
-      
+        
+      }else{
+        i3 = zero_df_idx_qubo[i1 - zero_df_idx.size()].first;
+        df_total += zero_df_idx_qubo[i1 - zero_df_idx.size()].second;
+        random_search_count = 0;
+
+      }
+      X(i3) = !X(i3);
+
+
       zero_df_idx.clear();
+      zero_df_idx_qubo.clear();
       
     }
   }
@@ -437,9 +388,8 @@ void unite_clusters(
 
 pair<ordered_setvector<_N0_>, MatrixXi>
 UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
-                    int maxK, int max_attempts,
-                    int restart_threshold, 
-                    int lower_E_threshold,
+                    int maxK, 
+                    int max_attempts,
                     int rndseed,
                     int BFS_E,
                     bool run_final_bfs,
@@ -477,6 +427,7 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
   } 
 
   int kprev = maxK;
+  int theta_index_prev = -1;
 
   int K = 0;
 
@@ -484,6 +435,10 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
 
   int restart = 0;        //to restart if stuck in some local minimum
   int restart_high_E = 0; //to restart from a low energy state
+  bool restarted = false; //restart indicator to correctly choose theta_prev
+
+  int restart_count = 0;
+  int restart_high_E_count = 0;
   
   int df_max = 0;
   int flip_count = 0;
@@ -496,8 +451,10 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
   int kprev_save = -1;
 
   int all_states = 0;
+
+  auto time_start = chrono::system_clock::now();
   
-  while (att < max_attempts) {
+  while (att <= max_attempts) { //limit the number of GWL steps to max_attempts
     int i = gsl_rng_uniform_int(r, N0);
 
     int df, df_out, dfq;
@@ -513,7 +470,7 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
     }
     X2(i) = !X2(i);
 
-    vector<E_set<_N0_>> Xdescent = random_descent(X2, &df_out, rndseed);
+    vector<E_set<_N0_>> Xdescent = random_descent(X2, &df_out, rndseed + att);
 
     if(Xdescent.size() == 0)
       throw runtime_error("Xdescent size = 0!");
@@ -524,15 +481,17 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
     }
     
     if(!heatup){
-      if(l > L/2){
+      if(l >= L-1){
         restart_high_E++;
       }
       
-      //low T MCMC when too high in energy
-      if(restart_high_E > lower_E_threshold)
+      //low T MCMC when too high in energy __MAX_RESTARTS__ times (optional)
+      if(restart_high_E == __RESTARTS_PERIOD__ && restart_high_E_count < __MAX_RESTARTS__)
       {
         restart_high_E = 0;
-        for (size_t i = 0; i < 1e2; i++)
+        restart_high_E_count++;
+
+        for (size_t i = 0; i < 10*N0; i++)
         {
           int i1 = gsl_rng_uniform_int(r, N0);;
 
@@ -555,9 +514,12 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         }
         kprev = maxK;
 
+        theta_index_prev = -1;
+
         kprev_save = -1;
         Ebar_outer = -1;
         
+        restarted = true;
         att--;
         
         continue;
@@ -653,11 +615,15 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         Ebar_outer = -1;
 
         kprev = maxK;
+
         lprev = L-1;
       }
 
       generate(begin(X), end(X), gen2);
       Eprev = Evalue_native(X);
+      
+      restarted = true;
+      theta_index_prev = -1;
 
     } else 
     {  
@@ -762,10 +728,11 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
             
             for (size_t i = 0; i < ucv_size-1; i++)
             {
-              //merge theta vectors
+              // merge theta vectors
               auto b = ucv_iter[x][ucv_size-i-1];
-              
-              get<2>(a->second) += get<2>(b->second);
+
+              // get<2>(a->second) += get<2>(b->second); //sum of columns
+              get<2>(a->second) = get<2>(a->second).cwiseMax(get<2>(b->second)); //max of rows of columns
               
               get<0>(a->second).merge(get<0>(b->second));
               
@@ -829,8 +796,7 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
             if(K == maxK){
               auto b = next(clusters_map.begin(), K-1);
               get<1>(b->second) = false;
-              
-              outer_theta += get<2>(b->second);
+              // outer_theta += get<2>(b->second);
               
               get<2>(b->second) = VectorXi::Zero(L);
             }
@@ -885,6 +851,23 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
             }
           }
         kprev_save = kprev_save_tmp;
+
+        int theta_index_prev_tmp = theta_index_prev;
+        if(theta_index_prev != -1 && theta_index_prev != maxK)
+          for (size_t x = 0; x < ucv_ids.size(); x++){
+            for (size_t i = 1; i < ucv_ids[x].size(); i++){
+              //adjusting index of previous basin after the unification of allstates
+              if(theta_index_prev == ucv_ids[x][i]){
+                theta_index_prev_tmp = ucv_ids[x][0];
+                break;
+              }
+              if(theta_index_prev > ucv_ids[x][i]){
+                theta_index_prev_tmp--;
+              }
+            }
+          }
+        theta_index_prev = theta_index_prev_tmp;
+
       }
       
       
@@ -897,6 +880,10 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         if(kprev_save >= k && kprev_save != maxK){  // correct the histogram index after the new basin discovery
           kprev_save++;
         }
+
+        if(theta_index_prev >= k && theta_index_prev != maxK){  // correct the histogram index after the new basin discovery
+          theta_index_prev++;
+        }
       }
       
       if (k == kprev) {
@@ -905,7 +892,7 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         restart = 0;
       }
       
-      
+      //adjust the histogram for the zero barriers sequence
       for (size_t i = 0; i < zbseq.size(); i++)
       {
         for (size_t j = i+1; j < zbseq.size(); j++)
@@ -926,8 +913,13 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
               
               auto a = next(clusters_map.begin(), jj);
               
-              get<2>(a->second) += get<2>(b->second);
+              // get<2>(a->second) += get<2>(b->second);
+              get<2>(a->second) = get<2>(a->second).cwiseMax(get<2>(b->second));
               get<2>(b->second) = VectorXi::Zero(L);
+
+              if(theta_index_prev == ii){
+                theta_index_prev = jj;
+              }
             }
             
           }
@@ -941,6 +933,7 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
       if(kprev != maxK)
         akprev = next(clusters_map.begin(), kprev);
       
+      //modify the barrier matrix
       if(k != kprev && k != maxK && kprev != maxK)
       {
         int Ebar;
@@ -954,28 +947,40 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         {
           barriers(k, kprev) = barriers(kprev, k) = Ebar;
           
+          //adjust the histogram if the barrier is zero explicitly
           if(!get<1>(ak->second) && Ebar == ak->first.first)
           {
             get<1>(ak->second) = true;
-            get<2>(akprev->second) += get<2>(ak->second);
+            // get<2>(akprev->second) += get<2>(ak->second);
+            get<2>(akprev->second) = get<2>(akprev->second).cwiseMax(get<2>(ak->second));
             get<2>(ak->second) = VectorXi::Zero(L);
+
+            if(theta_index_prev == k){
+              theta_index_prev = kprev;
+            }
           }
           
           if(!get<1>(akprev->second) && Ebar == akprev->first.first)
           {
             get<1>(akprev->second) = true;
-            get<2>(ak->second) += get<2>(akprev->second);
+            // get<2>(ak->second) += get<2>(akprev->second);
+            get<2>(ak->second) = get<2>(ak->second).cwiseMax(get<2>(akprev->second));
             get<2>(akprev->second) = VectorXi::Zero(L);
+            
+            if(theta_index_prev == k){
+              theta_index_prev = kprev;
+            }
           }
           
-          int k1, k2;
-          if(kprev < k){
-            k1 = kprev;
-            k2 = k;
-          }else{
-            k1 = k;
-            k2 = kprev;
-          }
+          // //indices for the ridge descent
+          // int k1, k2;
+          // if(kprev < k){
+          //   k1 = kprev;
+          //   k2 = k;
+          // }else{
+          //   k1 = k;
+          //   k2 = kprev;
+          // }
 
         }
       }
@@ -995,9 +1000,6 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
           barriers(k, kprev_save) = Ebartmp;
           barriers(kprev_save, k) = Ebartmp;
         }
-
-//        kprev_save = -1;
-//        Ebar_outer = -1;
         
       }else if(k != maxK && kprev != maxK){
         kprev_save = -1;
@@ -1005,59 +1007,75 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
       }
       
       if(kprev != maxK && Eprev < akprev->first.first)
-        throw runtime_error("Error 1276!");
+        throw runtime_error("Error!");
       
-      
-      int theta_index_prev = kprev;
       int theta_prev = outer_theta(lprev);
-      if(kprev != maxK){
-        theta_prev = get<2>(akprev->second)(lprev);
-        if(auto ittmp = akprev; get<1>(akprev->second)){
-          int ktmp = kprev;
-          int lm_E = akprev->first.first;
+      if (theta_index_prev == -1 || get<1>(next(clusters_map.begin(), theta_index_prev)->second) == true){
+        if (theta_index_prev == -1)
+          theta_index_prev = kprev;
+        
+        if(theta_index_prev != maxK)
+        {
+          auto akth_prev = next(clusters_map.begin(), theta_index_prev);
           
-          bool local_minimum = false;
+          theta_prev = get<2>(akprev->second)(lprev);
           
-          while(!local_minimum){
-            Vint zerobars;
-            int b;
-            for(int i = 0; i < barriers.cols(); i++){
-              b = barriers(ktmp, i);
-              if(b == lm_E){
-                zerobars.push_back(i);
-              }
-            }
-            if(zerobars.size() != 0){
-              int ii = gsl_rng_uniform_int(r, zerobars.size());
-              ktmp = zerobars[ii];
-
-              ittmp = next(clusters_map.begin(), ktmp);
-              int lm_E2 = ittmp->first.first;
-              
-              if(lm_E2 >= lm_E)
-              {
-                if(logout){
-                  (*logout) << "Warning: barrier error kprev: lm_E2 >= lm_E: " << endl;
-                  (*logout) << lm_E2 << " " << lm_E << " " << kprev << " " << ktmp << endl;
+          if(auto ittmp = akprev; get<1>(akprev->second)){
+            int ktmp = theta_index_prev;
+            int lm_E = akth_prev->first.first;
+            
+            bool local_minimum = false;
+            
+            while(!local_minimum){
+              Vint zerobars;
+              int b;
+              for(int i = 0; i < barriers.cols(); i++){
+                b = barriers(ktmp, i);
+                if(b == lm_E){
+                  zerobars.push_back(i);
                 }
-                local_minimum = true;
               }
-              
-              if(get<1>(ittmp->second))
-              {
-                lm_E = lm_E2;
+              if(zerobars.size() != 0){
+                int ii = gsl_rng_uniform_int(r, zerobars.size());
+                // get<2>(next(clusters_map.begin(), zerobars[ii])->second) += get<2>(ittmp->second);
+                get<2>(next(clusters_map.begin(), zerobars[ii])->second) 
+                  = get<2>(next(clusters_map.begin(), zerobars[ii])->second).cwiseMax(get<2>(ittmp->second));
+                get<2>(ittmp->second) = VectorXi::Zero(L);
+                
+                ktmp = zerobars[ii];
+                
+                ittmp = next(clusters_map.begin(), ktmp);
+                int lm_E2 = ittmp->first.first;
+                
+                if(lm_E2 >= lm_E)
+                {
+                  if(logout){
+                    (*logout) << "Warning: barrier error kprev: lm_E2 >= lm_E: " << endl;
+                    (*logout) << lm_E2 << " " << lm_E << " " << kprev << " " << ktmp << endl;
+                  }
+                  local_minimum = true;
+                }
+                
+                if(get<1>(ittmp->second))
+                {
+                  lm_E = lm_E2;
+                }else{
+                  local_minimum = true;
+                }
               }else{
-                local_minimum = true;
+                throw runtime_error("barrier error kprev: zerobars.size() == 0");
               }
-            }else{
-              throw runtime_error("barrier error kprev: zerobars.size() == 0");
             }
+            theta_prev = get<2>(ittmp->second)(lprev);
+            theta_index_prev = ktmp;
           }
-          theta_prev = get<2>(ittmp->second)(lprev);
-          theta_index_prev = ktmp;
         }
+      }else if (theta_index_prev != maxK)
+      {
+        theta_prev = get<2>(next(clusters_map.begin(), theta_index_prev)->second)(lprev);
       }
       
+
       int theta_index = k;
       int theta_new = outer_theta(l);
       if(k != maxK){
@@ -1078,6 +1096,12 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
             }
             if(zerobars.size() != 0){
               int ii = gsl_rng_uniform_int(r, zerobars.size());
+              
+              // get<2>(next(clusters_map.begin(), zerobars[ii])->second) += get<2>(ittmp->second);
+              get<2>(next(clusters_map.begin(), zerobars[ii])->second) 
+                = get<2>(next(clusters_map.begin(), zerobars[ii])->second).cwiseMax(get<2>(ittmp->second));
+              get<2>(ittmp->second) = VectorXi::Zero(L);
+              
               ktmp = zerobars[ii];
 
               ittmp = next(clusters_map.begin(), ktmp);
@@ -1104,16 +1128,23 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
           theta_new = get<2>(ittmp->second)(l);
           theta_index = ktmp;
         }
+        
+        if (get<1>(next(clusters_map.begin(), theta_index)->second) == true)
+          throw runtime_error("theta_index is a saddle cluster!");
+        
       }
-      
-      p = exp(-beta * df + (theta_prev - theta_new));
-      
+
+      if(-beta * df + (theta_prev - theta_new) > 0){
+        p = 1;
+      }else{
+        p = exp(-beta * df + (theta_prev - theta_new));
+      }
 
       bool fliptaken = false;
       total_flip_attempts++;
-      
-      int kprev_report = kprev;
-      if (gsl_rng_uniform(r) < p)
+
+      int theta_index_prev_report = theta_index_prev;
+      if (gsl_rng_uniform(r) < p || restarted)
       {
         flip_count++;
         X(i) = !X(i);
@@ -1121,25 +1152,35 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
 
         Eprev += df;
         
-        if(theta_index != maxK){
-          get<2>(next(clusters_map.begin(), theta_index)->second)(l)++;
+        if (!restarted){
+          if(theta_index != maxK){
+            get<2>(next(clusters_map.begin(), theta_index)->second)(l)++;
+            
+          }else{
+            outer_theta(l)++;
+          }
+          
         }else{
-          outer_theta(l)++;
+          restarted = false;
         }
-
+        
         lprev = l;
         kprev = k;
 
+        theta_index_prev = theta_index;
+
       } else {
+
         if(theta_index_prev != maxK){
           get<2>(next(clusters_map.begin(), theta_index_prev)->second)(lprev)++;
+
         }else{
           outer_theta(lprev)++;
         }
+
       }
       
-      
-      if((att)%((max_attempts)/10) == 0)
+      if((att%(max_attempts/10)) == 0)
       {
         all_states = 0;
         int i = 0;
@@ -1172,26 +1213,19 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
         }
         
       }
-            
-//       cout << "\rflip: " << fliptaken
-//       // << ", p = " << p
-//       << ", l = " << l
-//       << ", k = " << theta_index
-//       << ", kprev: " << theta_index_prev
-//       << ", att: " << att
-//       << ", maxE: " << current_maxE
-//       << ", all_states: " << all_states
-//       << ", totalK: " << clusters_map.size() << flush;
-      
 
-      if (restart == restart_threshold) {
-        if(logout){
-          (*logout) << endl << "\rRestarted at att: " << att << endl;
-        }
+      //restart when stuck in one basin __MAX_RESTARTS__ times (optional)
+      if (restart == __RESTARTS_PERIOD__ && restart_count < __MAX_RESTARTS__) 
+      {
+        restart_count++;
+
         restart = 0;
+        restarted = true;
         
         generate(begin(X), end(X), gen2);
         kprev = maxK;
+
+        theta_index_prev = -1;
 
         kprev_save = -1;
         Ebar_outer = -1;
@@ -1226,15 +1260,13 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
       (*logout) << a->first.first << " ";
     }
     (*logout) << endl;
-  }
 
-
-  if(logout){
     (*logout) << "Max gradient observed : beta*df:  "
       << beta*df_max << endl;
-  }
-  if(logout){
+  
     (*logout) << "Acceptance rate:  " << 1.0*flip_count/total_flip_attempts << endl;
+    (*logout) << "Restart count (basin):  " << restart_count << endl;
+    (*logout) << "Restart count (high E):  " << restart_high_E_count << endl;
   }
 
   
@@ -1273,16 +1305,19 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
   if(logout)
   {
     (*logout) << "Current maximum tracked energy, max E = E(K): " << barriers(last, last) << endl;
-    // (*logout) << endl << "Bound states in a thread (e <= max E): " << bound_states << endl;
-
     (*logout) << "Tracked states in a thread (k <= K): " << tracked_states << endl;
+  }
+
+  auto time_end = chrono::system_clock::now();
+  if(logout){
+    (*logout) << "(GWL) Sampling time elapsed: " 
+      << chrono::duration<double>(time_end - time_start).count() << " (seconds)" << endl;
   }
   
   if(run_final_bfs)
   {
-    if(logout){
-      (*logout) << "Final BFS_E >= max_E: " << (BFS_E >= barriers(last, last)) << endl;
-
+    if(logout)
+    {
       (*logout) << "Final BFS for E<=" << BFS_E << " running... " << endl;
       (*logout) << "Per energy limit of states: " << _CUMULATIVE_BFS_LIMIT_ << endl;
     }
@@ -1403,20 +1438,45 @@ UboLandscape::run_GWLBS(double beta, const VectorXd &E_partition,
   }
 
   ofstream fout(out_pth);
-  MatrixXi theta_out = MatrixXi::Zero(L+1, maxK+1);
+  MatrixXi theta_out = MatrixXi::Zero(L, maxK+1);
+  // MatrixXi theta_out = MatrixXi::Zero(L+1, maxK+1); //for checking local minimum/saddle type
 
   a = clusters_map.begin();
   for (size_t i = 0; i < K; i++)
   {
     theta_out(seq(0, L-1), i) = get<2>(a->second);
-    theta_out(L, i) = (int)(get<1>(a->second));
+    // theta_out(L, i) = (int)(get<1>(a->second)); //for checking local minimum/saddle type
     
     a++;
   }
   theta_out(seq(0, L-1), maxK) = outer_theta;
   
+  //save the histogram
   fout << theta_out << endl;
   fout.close();
+
+  //check the standard deviation of the histogram
+  vector<int> theta_nonzero;
+  for (auto th: theta_out(seq(0, L-1), all).reshaped()){
+    if (th != 0){
+      theta_nonzero.push_back(th);
+    }
+  }
+  if (logout){
+    (*logout) << "Histogram parameters:" << endl;
+
+    int th_all = std::accumulate(theta_nonzero.begin(), theta_nonzero.end(), 0.0);
+
+    double th_mean = 1.0*th_all/theta_nonzero.size();
+    (*logout) << "<th> = " << th_mean << endl;
+
+    double var = 0;
+    for(auto th: theta_nonzero)
+      var += (th - th_mean) * (th - th_mean);
+    
+    var /= theta_nonzero.size();
+    (*logout) << "sd(th) = " << sqrt(var) << endl;
+  }
 
   gsl_rng_free(r);
 
@@ -1466,7 +1526,6 @@ void UboLandscape::bfs_candidates(const set<bitvec<_N0_>, VecCmp<_N0_>>& bfs_cur
                                   idset<_N0_>& bas,
                                   int& size_count)
 {
-  bool has_exit = false;
   for(auto& v: bfs_current)
   {
     VectorXb Vb = toVec<_N0_>(v);

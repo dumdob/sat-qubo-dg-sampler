@@ -1,19 +1,19 @@
 {
     "num_threads": 1,
-    "output_path": "dg_data",
-
-    "seed": 123,
+    "output_folder": "dg_data",
     
+    "runID": "test",
+
+    "seed": 0,
+    "max_gwl_steps": 4000000,
+
     "problem_class": "uf",
+    "mappingID": 0,
+
+    "K": 150,
     
-    "max_gwl_steps": 100000,
-
-    "K_basins": 100,
-
-    "beta_scale": 1,
-    "E_scale": 0.75,
-
-    "BFS_E_max": 3,
+    "E_max": 16,
+    "BFS_E_max": 4,
 
     "save_local_minima": true
 }

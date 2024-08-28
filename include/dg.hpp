@@ -151,7 +151,6 @@ struct UboLandscape
   VectorXi B0;
   int C0;
   
-  int is_steepest = false;
   bool qubo_landscape = false;
 
   UboLandscape(const MatrixXi &M, int N0, 
@@ -167,8 +166,6 @@ struct UboLandscape
   
   vector<E_set<_N0_>> random_descent(
     const VectorXb &X0, int *df_out, int rndseed = 0);
-    
-  pair<VectorXb, Vint> ballistic_search(const VectorXb& start, int dir0, const VectorXi& ballistic_dirs);
 
   void run_bfs(const set<bitvec<_N0_>, VecCmp<_N0_>>& states, int clID, idset<_N0_>& allclusters);
 
@@ -187,8 +184,6 @@ struct UboLandscape
     double beta,
     const VectorXd &E_partition, int K,
     int max_attempts,
-    int restart_threshold, 
-    int lower_E_threshold, 
     int rndseed,
     int BFS_E,
     bool run_final_bfs,

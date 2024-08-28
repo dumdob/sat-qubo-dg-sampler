@@ -1,0 +1,22 @@
+{
+  "log_to_file": true,
+
+  "name": "uf",
+
+  "seed": 0,
+  "nreps": 10240,
+
+  "num_workers": 8,
+
+  "solver_config": {
+    "mapping_name": "rosenberg",
+    "mapping_type" : "shared",
+    
+    "mode": "qubo",
+    "nsweeps": 3200
+  },
+
+  "percentiles": [20, 50, 80],
+  
+  "track_stats_freq": 10
+}

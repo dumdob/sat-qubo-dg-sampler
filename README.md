@@ -1,7 +1,7 @@
-# Disconnectivity graph sampler for PUBO/QUBO mappings of 3-SAT problems
+# Disconnectivity graphs sampler + simulated annealing for PUBO/QUBO mappings of 3-SAT problems
 
-C++ code used to generate results of the paper 
-[Disconnectivity graphs for visualizing combinatorial optimization problems: challenges of embedding to Ising machines (arXiv:2403.01320)](https://arxiv.org/abs/2403.01320).
+C++ code used to generate results of the paper: 
+[Energy landscapes of combinatorial optimization in Ising machines (arXiv:2403.01320)](https://arxiv.org/abs/2403.01320).
 
 ## Build
 ### Compiler and Libraries
@@ -15,20 +15,20 @@ Libraries required:
 ### Makefile
 
 Modify makefile to support the aforementioned compilers and libraries on your system and run `make`.
-
-To change the internal configuration of the sampler, modify the file `config.hpp` accordingly (see also comments for more details).
+To change the internal configuration of the sampler for your problem class, modify the file `include/config.hpp` accordingly (see also comments for more details).
 
 ## Config
-`config.json` file contains the parameters that can be changed without recompiling. They include: number of parallel threads (if OpenMP is supported), output directory name, random seed, problem class, maximum GWL number of steps, saving all local minima states (true/false).
+`config.json` file contains the parameters that can be changed without recompiling. They include: number of parallel threads (if OpenMP is supported), output directory name, run name, random seed, problem class, maximum GWL number of steps, mapping ID (0 for PUBO, 1 for Rozenberg, 2 for KZFD), number of tracked clusters (K), maximum energy of GWL histogram, maximum energy of breadth-first search, saving all local minima states (true/false).
+
+## Problem instances
+Problem instances need to be stored in the "problems/[problem_class]" directory; 
+3-SAT instances should be named as [problem_class][problem_size]-[instance_number].cnf
 
 ## Run
-To run the sampler, the following command-line parameters need to be specified: problem instance number, mapping ID (0 for PUBO, 1 for Rozenberg, 2 for KZFD), run ID (arbitrary).
-
+Run the program specifying the [instance_number] number
 ```
-./dg_sampler.out 1 0 testrun
+./dg_sampler.out [instance_number]
 ```
 
-Several files with the given run ID name will be generated in the output directory: log file with all details of the run for each parallel thread, energy barriers matrix, local minimum/saddle cluster degeneracy, and the GWL historgram for each of the samplers in i-th parallel thread (see also comments in `config.hpp` for more details).
-
-## Disconnectivity graphs construction
-To construct disconnectivity graphs from the sampled data one could use open-source library [pele: Python Energy Landscape Explorer](http://pele-python.github.io/pele/)
+## Output
+Several files with the given run name will be generated in the output directory: log file with all details of the run for each parallel thread, energy barriers matrix, local minimum/saddle cluster degeneracy, and the GWL historgram for each of the samplers in parallel threads.

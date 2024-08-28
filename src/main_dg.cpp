@@ -7,29 +7,29 @@ int main(int c_args, char *arg[])
 {
   json dg_pars = json::parse(ifstream(pth("configs")/"config.json"));
 
-  string output_path = dg_pars["output_path"];
+  string output_path = dg_pars["output_folder"];
 
   if(!filesystem::exists(pth(output_path)))
     filesystem::create_directory(pth(output_path));
   
+  if (c_args != 2)
+  {
+      std::cerr << "Usage: " << arg[0] << " instance_number\n";
+      exit(EXIT_FAILURE);
+  }
 
-  int max_gwl_steps = dg_pars["max_gwl_steps"];
   int seed = dg_pars["seed"];
 
   string problem_class = dg_pars["problem_class"];
 
-  if (c_args != 4)
-  {
-      std::cerr << "Usage: " << arg[0] << " instance_number mappingID runID\n";
-      exit(EXIT_FAILURE);
-  }
-
-  string runID(arg[3]);
+  string runID = dg_pars["runID"];
 
   int instance = atoi(arg[1]);
   runID += "_" + to_string(instance);
 
-  int mappingID = atoi(arg[2]);
+  int mappingID = dg_pars["mappingID"];
+
+  int max_gwl_steps = dg_pars["max_gwl_steps"];
   
   pth save_name("map" + to_string(mappingID) + "_" + runID + ".dat");
   pth barriers_file_name      = pth("barriers_") += save_name;
@@ -47,8 +47,10 @@ int main(int c_args, char *arg[])
     ostream& logout = cout;
   #endif
 
-  logout << "Mapping ID: " << mappingID << endl;
-  logout << "Run ID: "     << runID << endl;
+  logout << "Mapping ID: "  << mappingID << endl;
+  logout << "Run ID: "      << runID << endl;
+  logout << "Random seed: " << seed << endl;
+  
 
   MatrixXi W;
   VectorXi B;
@@ -95,7 +97,7 @@ int main(int c_args, char *arg[])
   if(N != 0) logout << "QUBO mapping size: " << N << endl;
 
 
-  // Estimate mean random energy (mean at beta = 0)
+  // Estimate mean random energy
   VectorXb Xtest(_N0_);
   int Etest = 0;
   for (size_t i = 0; i < 500; i++)
@@ -104,11 +106,9 @@ int main(int c_args, char *arg[])
     Etest += QL.Evalue_native(Xtest);
   }
   double mean_E = 1.0*Etest/500;
-  logout << "Mean random pubo energy: " << mean_E << endl;
+  logout << "Mean random energy (native): " << mean_E << endl;
 
-
-  // Estimate mean random beta
-  
+  // Estimate mean random dE
   int dEtest = 0;
   for (size_t i = 0; i < 500; i++)
   {
@@ -122,48 +122,37 @@ int main(int c_args, char *arg[])
     }
     dEtest += dEtmp;
   }
-
-  logout << "Mean random dE_native: " << 1.*dEtest/500 << endl;
+  logout << "Mean random dE (native): " << 1.0*dEtest/500 << endl;
   double beta = 500.0/dEtest;
   
-  //Number of steps in a single basin limit
-  int restart_limit = _RESTART_LIMIT_;
-
-  //Number of steps at high energies limit
-  int high_e_limit = _HIGH_E_LIMIT_;
-  
   //multiplier to adjust beta
-  int beta_scale = dg_pars["beta_scale"];
-  beta *= beta_scale;
+  beta *= _BETA_SCALE_;
   logout << "Beta = 1/T = beta_scale/<dE> " << beta << endl;
 
-  //multiplier to adjust upper energy of GWL
-  double E_scale = dg_pars["E_scale"];
-  VectorXd E_partition = VectorXd::LinSpaced((int)(E_scale*mean_E) + 1, 0, (int)(E_scale*mean_E));
-  
+  //maximum energy of the GWL histogram
+  int E_max = dg_pars["E_max"];
+  VectorXd E_partition = VectorXd::LinSpaced(E_max + 1, 0, E_max);
+
+
   logout << "Energy partition size: " << E_partition.size() << endl;
   logout << "Energy partition" << endl << E_partition.transpose() << endl;
-  logout << "Energy partition max E (<E> x E_scale)" << endl << E_partition.transpose() << endl;
-
-  // Use steepest descent if needed
-  QL.is_steepest = false;
 
   //maximum energy at which BFS is performed
   int BFS_E = dg_pars["BFS_E_max"]; 
 
-  logout << "QUBO mapping landscape: " << QL.qubo_landscape << endl;
-  if(QL.qubo_landscape)
+  if(QL.qubo_landscape){
+    logout << "QUBO mapping landscape: True" << endl;
     logout << "QUBO barrier factor: " << _QUBO_BAR_FACTOR_ << endl;
+  }else{
+    logout << "QUBO mapping landscape: False" << endl;
+  }
   
-  int K = dg_pars["K_basins"];
+  int K = dg_pars["K"];
 
   logout << "Basin partition size: " << K << endl;
-  #ifdef _BALLISTIC_SEARCH_
-  logout << "Local search heuristic: " << "Ballistic search" << endl;
-  #else
+
   logout << "Local search heuristic: " << "Random search" << endl;
   logout << "Random search limit: " << _RS_LIMIT_ << endl;
-  #endif
 
   logout << "GWL BFS LIMIT " << _GWL_BFS_LIMIT_ << endl;
   logout << "CUMULATIVE BFS LIMIT " << _CUMULATIVE_BFS_LIMIT_ << endl;
@@ -197,6 +186,8 @@ int main(int c_args, char *arg[])
   logout << "OMP using threads: " << MAX_TH << endl;
   logout << "Max sweeps per thread: " << max_gwl_steps << endl;
 
+  auto time_start = chrono::system_clock::now();
+
 #ifdef _OPENMP 
   #pragma omp parallel for
   for (size_t th = 0; th < MAX_TH; th++) 
@@ -216,8 +207,6 @@ int main(int c_args, char *arg[])
                               E_partition, 
                               K, 
                               max_gwl_steps,
-                              restart_limit,
-                              high_e_limit,
                               seed+th, 
                               BFS_E,
                               run_final_bfs,
@@ -234,8 +223,6 @@ int main(int c_args, char *arg[])
                           E_partition, 
                           K, 
                           max_gwl_steps,
-                          restart_limit,
-                          high_e_limit,
                           seed,
                           BFS_E,
                           true,
@@ -243,6 +230,10 @@ int main(int c_args, char *arg[])
                           &logout);
 
 #endif
+
+  auto time_end = chrono::system_clock::now();
+  logout << "(TOTAL GWL + BFS postprocessing) Sampling time elapsed: " 
+    << chrono::duration<double>(time_end - time_start).count() << " (seconds)" << endl;
   
   RowVectorXi disconnected_lm = RowVectorXi::Zero(MAX_TH);
   for (size_t th = 0; th < MAX_TH; th++)
@@ -760,7 +751,7 @@ endclustercollection:
 
   if(dg_pars["save_local_minima"])
   {
-    logout << "Saving perceived local minima..." << endl;
+    logout << "Saving found local minima..." << endl;
 
     if(not filesystem::exists(pth(output_path)/"local_minima"))
       filesystem::create_directory(pth(output_path)/"local_minima");
@@ -783,7 +774,7 @@ endclustercollection:
       {
         continue;
       }
-
+      
       fout.open(pth(output_path)/lm_path/pth(to_string(i) + ".dat"));
       
       for(auto &av: output_clusters[i].second)

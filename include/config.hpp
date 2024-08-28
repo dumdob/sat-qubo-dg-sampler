@@ -1,11 +1,39 @@
 #pragma once
 
+
+//====== Configure for your problem class ======
+#define _N0_ 50               //Native problem size
+#define _QUBO_BAR_FACTOR_ 1   //QUBO barrier factor (for QUBO only)
+#define _WRITE_COUT_       //Write log to cout (not file)
+
+#define _BETA_SCALE_ 1.0      //beta = 1/T = _BETA_SCALE_/<dE> hyperparameter
+
+#define _RS_LIMIT_ 20         //random search in the plateu region limit
+
+#define _GWL_BFS_LIMIT_ 10             //BFS limit per cluster during sampling
+#define _CUMULATIVE_BFS_LIMIT_ 10000000 //BFS limit per energy level during postprocessing
+
+#define __RESTARTS_PERIOD__ 20000 //step period of restarts if stuck in high E region or a specific local minimum
+#define __MAX_RESTARTS__    1000  //maximum number of restarts if stuck in high E region or a specific local minimum
+
+
+
+//====== Output of the program ======
+// - energy barrier matrix; symmetric, local minimum/saddle energy on the diagonal, -1 stands for an undiscovered barrier between corresponding local minima/saddles
+// - GWL histogram; saddles have 0 visits, last column stands for visits to the untracked basins, last row denotes local minimum/saddle type of a degenerate cluster (0/1)
+// - cluster degeneracies (number of stable connected states) in the corresponding order of the barrier matrix
+// - explicit local minimum states in the corresponding order of the barrier matrix
+// - logs
+
+
+
 #include <iostream>
 #include <fstream>
 #include <list>
 #include <map>
 #include <set>
 #include <bitset>
+#include <chrono>
 using namespace std;
 
 #ifdef _OPENMP
@@ -45,22 +73,3 @@ enum class MapIDs{
 
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_randist.h>
-
-#define _N0_ 50               //Problem size
-#define _QUBO_BAR_FACTOR_ 2   //QUBO barrier factor
-// #define _WRITE_COUT_       //Write log to cout (not file)
-
-// #define _BALLISTIC_SEARCH_ 
-#define _RS_LIMIT_ 20         //random search in the plateu region limit
-
-#define _GWL_BFS_LIMIT_ 500   //BFS limit per cluster during sampling
-#define _CUMULATIVE_BFS_LIMIT_ 10000000 //BFS limit per energy during postprocessing
-
-#define _RESTART_LIMIT_ 10000 //maximum steps allowed in a single basin before random restart
-#define _HIGH_E_LIMIT_  10000 //maximum steps allowed in high E region before annealing
-
-// Output of the program:
-// - energy barrier matrix; symmetric, local minimum/saddle energy on the diagonal, -1 stands for the undiscovered barrier between corresponding local minima/saddles
-// - GWL histogram; saddles have 0 visits, last column stands for visits to the untracked basins, last row denotes local minimum/saddle type of a degenerate cluster (1/0)
-// - cluster degeneracies in the corresponding order of the barrier matrix
-// - explicit local minima states in the corresponding order of the barrier matrix
