@@ -22,7 +22,7 @@ To change the internal configuration of the sampler for your problem class, modi
 
 ## Problem instances
 Problem instances need to be stored in the "problems/[problem_class]" directory; 
-3-SAT instances should be named as [problem_class][problem_size]-[instance_number].cnf
+3-SAT instances should be named as [problem_class][problem_size]-0[instance_number].cnf
 
 ## Run
 Run the program specifying the [instance_number] number
